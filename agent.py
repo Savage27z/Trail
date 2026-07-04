@@ -228,6 +228,20 @@ async def _emit(on_step: OnStep, desc: Optional[str], summary: Optional[str]) ->
         log.exception("on_step callback failed (ignored)")
 
 
+def _thought_line(text: Optional[str], limit: int = 160) -> Optional[str]:
+    """Condense the model's inter-tool reasoning into one live-view line."""
+    if not text:
+        return None
+    # strip markdown decoration and collapse whitespace
+    flat = re.sub(r"[*_`#>|-]+", " ", text)
+    flat = re.sub(r"\s+", " ", flat).strip()
+    if len(flat) < 12:  # nothing meaningful to show
+        return None
+    if len(flat) > limit:
+        flat = flat[: limit - 1].rsplit(" ", 1)[0] + "…"
+    return f"💭 {flat}"
+
+
 async def investigate(
     cfg: Config,
     address: str,
@@ -361,6 +375,12 @@ async def _run_native_loop(
         msg = await runtime.chat(messages, tools=TOOL_SCHEMAS)
         tool_calls = getattr(msg, "tool_calls", None) or []
 
+        # surface the agent's reasoning in the live view — this is the
+        # "LLM decides the path" moment, make it visible
+        thought = _thought_line(msg.content)
+        if thought and tool_calls:
+            await _emit(on_step, thought, None)
+
         if not tool_calls:
             # model is done reasoning — keep its conclusion in context
             messages.append({"role": "assistant", "content": msg.content or ""})
@@ -459,6 +479,10 @@ async def _run_react_loop(
         if action.get("action") == "finish":
             log.info("ReAct: model finished after %d round(s)", round_no)
             break
+
+        thought = _thought_line(str(action.get("thought") or ""))
+        if thought:
+            await _emit(on_step, thought, None)
 
         name = str(action.get("action"))
         args = action.get("args") if isinstance(action.get("args"), dict) else {}

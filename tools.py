@@ -598,9 +598,19 @@ class ToolBox:
             osigs, oexh, oerr = await self._signatures(owner, max_pages=1)
             if oerr or not osigs:
                 return None
+            oldest_reachable = _days_ago(osigs[-1].get("blockTime"))
             if not oexh:
-                return {"owner": owner, "wallet_age_days": ">many (1000+ txs)"}
-            days = _days_ago(osigs[-1].get("blockTime"))
+                out = {"owner": owner, "wallet_age_days": "unknown (1000+ txs)"}
+                if oldest_reachable is not None and oldest_reachable < 7:
+                    # 1000+ txs and even the 1000th-most-recent is <7d old:
+                    # either a brand-new hyperactive bot or an extremely busy service
+                    out["hyperactive"] = True
+                    out["note"] = (
+                        f"1000+ txs but oldest reachable tx is only {oldest_reachable}d old — "
+                        "bot-grade activity burst; treat as suspicious as a fresh wallet"
+                    )
+                return out
+            days = oldest_reachable
             return {"owner": owner, "wallet_age_days": days, "fresh": bool(days is not None and days < 7)}
 
         ages = await asyncio.gather(*(_age(o) for o in check))
@@ -613,7 +623,7 @@ class ToolBox:
             for h in holders
             if h.get("owner") in KNOWN_ACCOUNTS
         ]
-        n_fresh = sum(1 for a in fresh_flags if a.get("fresh"))
+        n_fresh = sum(1 for a in fresh_flags if a.get("fresh") or a.get("hyperactive"))
 
         return _clean(
             {

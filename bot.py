@@ -258,7 +258,8 @@ async def bare_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if BASE58_RE.match(text):
         context.args = [text]
         await cmd_scan(update, context)
-    else:
+    elif update.effective_chat and update.effective_chat.type == "private":
+        # only nag about invalid input in DMs — in groups, stay silent
         await update.message.reply_text(
             "Paste a Solana address or use /scan <address>. /start for help."
         )

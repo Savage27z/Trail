@@ -93,7 +93,9 @@ VERDICT_SCHEMA = {
 
 VERDICT_PROMPT = f"""The investigation is over. Produce the final case file NOW.
 
-Output ONLY a single JSON object — no markdown fences, no commentary before or after. Exact schema:
+If you were following a thought/action tool protocol, ABANDON it for this reply — do not output a
+thought/action object. Output ONLY a single JSON object matching the case-file schema below — no
+markdown fences, no commentary before or after. Exact schema:
 
 {json.dumps(VERDICT_SCHEMA, indent=2)}
 
