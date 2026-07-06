@@ -33,6 +33,10 @@ TG_LIMIT = 4096
 
 # one investigation per user at a time (in-memory is fine for the hackathon)
 ACTIVE_USERS: set[int] = set()
+# protect Helius/Birdeye rate limits under judge-traffic spikes
+MAX_GLOBAL_INVESTIGATIONS = 3
+# last finished case file per user, for /last
+LAST_CASES: dict[int, str] = {}
 
 CFG = None  # set in main()
 
@@ -185,16 +189,36 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message is None:  # edited messages / channel posts
         return
     await update.message.reply_text(
-        "🕵️ <b>Trail — autonomous on-chain investigator</b>\n\n"
-        "Paste any Solana address and I'll investigate it live: an AI agent decides "
-        "step-by-step what on-chain data to pull, follows suspicious leads across "
-        "wallets, and delivers a verdict with cited evidence.\n\n"
-        "<b>Usage:</b>\n"
-        "<code>/scan &lt;token mint or wallet address&gt;</code>\n\n"
-        "Example:\n"
-        "<code>/scan DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263</code>",
+        "🕵️ <b>I'm Trail. I investigate Solana addresses.</b>\n\n"
+        "Drop me any address — a token mint or a wallet — and I'll put an AI "
+        "detective on the case. It decides what to check, follows the money "
+        "across wallets, and comes back with a verdict backed by on-chain "
+        "evidence. You watch every step happen live, including its reasoning.\n\n"
+        "🔴 rug setups &amp; insider launches\n"
+        "🤖 sniper bots &amp; serial deployers\n"
+        "🟢 …or a clean bill of health\n\n"
+        "<b>Just paste an address.</b> Or:\n"
+        "<code>/scan &lt;address&gt;</code> — standard investigation (~90s)\n"
+        "<code>/scan &lt;address&gt; deep</code> — longer trail, more wallet hops\n"
+        "<code>/last</code> — resend your latest case file\n\n"
+        "Try it on BONK:\n"
+        "<code>DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263</code>",
         parse_mode=ParseMode.HTML,
     )
+
+
+async def cmd_last(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message is None or update.effective_user is None:
+        return
+    case_html = LAST_CASES.get(update.effective_user.id)
+    if case_html:
+        await update.message.reply_text(
+            case_html, parse_mode=ParseMode.HTML, disable_web_page_preview=True
+        )
+    else:
+        await update.message.reply_text(
+            "No case files yet — paste a Solana address and I'll open one."
+        )
 
 
 async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -203,11 +227,12 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     args = context.args or []
 
-    # also accept a bare pasted address via the fallback handler
-    address = (args[0] if args else "").strip()
+    # accept "/scan <addr>", "/scan <addr> deep", "/scan deep <addr>"
+    deep = any(a.lower() == "deep" for a in args)
+    address = next((a.strip() for a in args if a.lower() != "deep"), "")
     if not address:
         await update.message.reply_text(
-            "Send me an address: /scan <token mint or wallet>"
+            "Send me an address: /scan <token mint or wallet> [deep]"
         )
         return
     if not BASE58_RE.match(address):
@@ -221,10 +246,19 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "⏳ I'm already working a case for you — one investigation at a time."
         )
         return
+    if len(ACTIVE_USERS) >= MAX_GLOBAL_INVESTIGATIONS:
+        await update.message.reply_text(
+            "🚦 All my investigators are on cases right now — try again in a minute."
+        )
+        return
 
     ACTIVE_USERS.add(user_id)
     try:
-        header = f"🔎 <b>Trail is on the case…</b>\nTarget: <code>{html.escape(address)}</code>"
+        mode_tag = " (deep scan)" if deep else ""
+        header = (
+            f"🔎 <b>Trail is on the case…{mode_tag}</b>\n"
+            f"Target: <code>{html.escape(address)}</code>"
+        )
         msg = await update.message.reply_text(
             header, parse_mode=ParseMode.HTML, disable_web_page_preview=True
         )
@@ -236,8 +270,17 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if summary:
                 await live.add_line(f"→ {summary}")
 
-        case = await investigate(CFG, address, addr_type=None, on_step=on_step)
-        await live.finalize(render_case_file_html(case, address))
+        case = await investigate(
+            CFG,
+            address,
+            addr_type=None,
+            on_step=on_step,
+            max_rounds=12 if deep else None,
+            max_seconds=180 if deep else None,
+        )
+        final_html = render_case_file_html(case, address)
+        LAST_CASES[user_id] = final_html
+        await live.finalize(final_html)
     except Exception:
         log.exception("investigation crashed for %s", address)
         try:
@@ -278,6 +321,7 @@ def main() -> None:
     )
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("scan", cmd_scan))
+    app.add_handler(CommandHandler("last", cmd_last))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bare_address))
 
     log.info("Trail bot starting (model=%s, native_tools=%s)", CFG.btl_model, CFG.btl_use_native_tools)

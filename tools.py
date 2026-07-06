@@ -37,13 +37,26 @@ _SEMAPHORE = asyncio.Semaphore(3)
 # Best-effort labels for well-known accounts so pools/CEX wallets aren't
 # misread as suspicious individual holders.
 KNOWN_ACCOUNTS = {
+    # DEX / launchpad infrastructure
     "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1": "Raydium AMM authority (liquidity pool)",
     "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8": "Raydium AMM V4 program",
     "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P": "pump.fun bonding curve program",
     "TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM": "pump.fun mint authority (platform infra)",
     "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg": "pump.fun fee account (platform infra)",
+    "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA": "pump.fun AMM program (platform infra)",
+    "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN": "Meteora dynamic bonding curve (platform infra)",
+    # CEX hot wallets (best-effort labels from public explorers — treat as
+    # "very likely CEX", used to mark funders/holders as benign custody)
     "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9": "Binance hot wallet (CEX)",
     "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM": "Binance hot wallet (CEX)",
+    "2ojv9BAiHUrvsm9gxDe7fJSzbNZSJcxZvf8dqmWGHG8S": "Binance hot wallet (CEX)",
+    "H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS": "Coinbase hot wallet (CEX)",
+    "GJRs4FwHtemZ5ZE9x3FNvJ8TgwitkBjVGhrKKrWV6mNx": "Coinbase hot wallet (CEX)",
+    "AC5RDfQFmDS1deWZos921JfqscXdByf8BKHs5ACWjtW2": "Bybit hot wallet (CEX)",
+    "5VCwKtCXgCJ6kit5FybXjvriW3xELsFDhYrPSqtJNmcD": "OKX hot wallet (CEX)",
+    "ASTyfSima4LLAdDgoFGkgqoKowG1LZFDr9fAQrg7iaJZ": "MEXC hot wallet (CEX)",
+    "FWznbcNXWQuHTawe9RxvQ2LdCENssh12dsznf4RiouN5": "Kraken hot wallet (CEX)",
+    "u6PJ8DtQuPFnfmwHbGFULQ4u4EgjDiyYKjVEsynXq2w": "Gate.io hot wallet (CEX)",
 }
 
 # Platform accounts that show up as the DAS "creator" of tokens they didn't
@@ -55,6 +68,8 @@ INFRA_CREATORS = {
     "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg",
     "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1",
     "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
+    "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+    "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN",
 }
 
 
@@ -288,6 +303,18 @@ class ToolBox:
                         ov.get("priceChange24hPercent") or ov.get("priceChange24h")
                     ),
                 }
+            )
+            # social presence: legit projects link a site/socials in metadata;
+            # anonymous zero-presence NEW tokens are a meaningful risk signal
+            ext = ov.get("extensions") or {}
+            socials = [
+                k for k in ("website", "twitter", "telegram", "discord", "medium", "github")
+                if ext.get(k)
+            ]
+            out["social_presence"] = (
+                socials
+                if socials
+                else "NONE — no website/socials in token metadata (risk signal for new tokens)"
             )
         else:
             out["overview_note"] = f"birdeye overview failed: {ov_err}"
@@ -748,9 +775,11 @@ TOOL_SCHEMAS: list[dict] = [
             "description": (
                 "Get a token's vital signs from market data: name/symbol, price, liquidity, "
                 "market cap, holder count, 24h volume, creation date/age, creator address, "
-                "top-10 holder concentration %, and whether metadata is mutable or a freeze "
-                "authority exists. START HERE for any token — it tells you if the token is "
-                "fresh, illiquid, or concentrated, which decides where to dig next."
+                "top-10 holder concentration %, social presence (website/twitter/telegram — "
+                "a NEW token with zero socials is a risk signal), and whether metadata is "
+                "mutable or a freeze authority exists. START HERE for any token — it tells "
+                "you if the token is fresh, illiquid, anonymous, or concentrated, which "
+                "decides where to dig next."
             ),
             "parameters": {
                 "type": "object",
@@ -911,6 +940,8 @@ def summarize_result(tool: str, args: dict, result: dict) -> str:
                 bits.append(f"liq ${_fmt_num(result['liquidity_usd'])}")
             if result.get("top10_holder_pct") is not None:
                 bits.append(f"top10 hold {round(result['top10_holder_pct'])}%")
+            if isinstance(result.get("social_presence"), str):  # the NONE case
+                bits.append("⚠️ no socials")
             return ", ".join(bits) or "overview retrieved"
         if tool == "get_deployer":
             return f"deployer {short(result.get('deployer'))}"

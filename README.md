@@ -89,7 +89,7 @@ The system prompt enforces **evidence discipline**: every citation must be a rea
 
 | Tool | Source | Question it answers |
 |---|---|---|
-| `get_token_overview` | Birdeye overview + security | Vital signs: age, price, liquidity, holders, top-10 concentration %, freeze authority, mutable metadata |
+| `get_token_overview` | Birdeye overview + security | Vital signs: age, price, liquidity, holders, top-10 concentration %, freeze authority, mutable metadata, and **social presence** (a new token with zero website/socials is flagged as a risk signal) |
 | `get_deployer` | Helius DAS → Birdeye creation tx | Who *really* created this token? Sees through launchpad infra (pump.fun mints via its own authority — Trail resolves the actual human creator from the creation tx) |
 | `get_wallet_funding` | Helius parsed history | Where did this wallet's money come from? Earliest incoming SOL transfers with sources, amounts, timestamps, tx sigs — the lead-generator |
 | `get_wallet_tokens_deployed` | Helius DAS | What else has this wallet launched? (serial-deployer detection) |
@@ -102,7 +102,7 @@ The system prompt enforces **evidence discipline**: every citation must be a rea
 - Compact JSON: top-10 array truncation, shortened addresses in prose, `None` fields dropped — 8 rounds of context stay token-cheap.
 - Per-investigation cache keyed by tool+args (errors deliberately *not* cached, so retries after transient failures work).
 - Global 3-slot semaphore + one retry with backoff on 429/5xx.
-- A curated label map (Raydium authority, pump.fun infra, Binance hot wallets) prevents the classic false positive of "OMG one wallet holds 60%!" when that wallet is a liquidity pool — and stops the agent wasting budget investigating platform infrastructure.
+- A curated label map (Raydium/Meteora/pump.fun infra plus Binance, Coinbase, Bybit, OKX, MEXC, Kraken and Gate.io hot wallets) prevents the classic false positive of "OMG one wallet holds 60%!" when that wallet is a liquidity pool — and stops the agent wasting budget investigating platform infrastructure.
 
 ---
 
@@ -189,7 +189,9 @@ python tools.py get_wallet_funding <wallet>
 python bot.py
 ```
 
-CLI flags: `--type token|wallet` skips auto-detection, `--json` prints the raw case file.
+CLI flags: `--type token|wallet` skips auto-detection, `--json` prints the raw case file, `--deep` runs a 12-round / 180s deep scan.
+
+**Bot commands:** paste a bare address (or `/scan <address>`) to investigate, `/scan <address> deep` for a longer trail with more wallet hops, `/last` to resend your latest case file. The bot runs at most one investigation per user and three globally (protects the data-provider rate limits under load).
 
 ### Configuration knobs (optional)
 

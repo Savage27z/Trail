@@ -247,15 +247,20 @@ async def investigate(
     address: str,
     addr_type: Optional[str] = None,
     on_step: OnStep = None,
+    max_rounds: Optional[int] = None,
+    max_seconds: Optional[int] = None,
 ) -> dict:
     """Run a full autonomous investigation. Returns the validated case-file dict.
 
+    max_rounds/max_seconds override the config budgets (used by deep-scan mode).
     Never raises for runtime/tool failures — returns a degraded case file instead.
     """
     t_start = time.monotonic()
     box = ToolBox(cfg)
     runtime = RuntimeClient(cfg)
     steps_taken: list[str] = []
+    rounds_budget = max_rounds or cfg.max_tool_rounds
+    seconds_budget = max_seconds or cfg.max_wall_seconds
 
     try:
         # 1. detect address type if the caller didn't
@@ -268,7 +273,10 @@ async def investigate(
         native = cfg.btl_use_native_tools
         try:
             if native:
-                truncated = await _run_native_loop(cfg, runtime, box, address, addr_type, type_note, on_step, steps_taken)
+                truncated = await _run_native_loop(
+                    runtime, box, address, addr_type, type_note, on_step, steps_taken,
+                    rounds_budget, seconds_budget,
+                )
                 messages = truncated["messages"]
                 hit_limit = truncated["hit_limit"]
             else:
@@ -278,12 +286,18 @@ async def investigate(
             if native and e.status_code is not None and 400 <= e.status_code < 500 and runtime.calls_made == 0:
                 log.warning("native tool-calling rejected by runtime — falling back to ReAct loop")
                 await _emit(on_step, "↩️ Runtime lacks native tools — switching to ReAct mode...", None)
-                result = await _run_react_loop(cfg, runtime, box, address, addr_type, type_note, on_step, steps_taken)
+                result = await _run_react_loop(
+                    runtime, box, address, addr_type, type_note, on_step, steps_taken,
+                    rounds_budget, seconds_budget,
+                )
                 messages, hit_limit = result["messages"], result["hit_limit"]
             else:
                 return _fallback_verdict(address, str(e), steps_taken)
         except _UseReact:
-            result = await _run_react_loop(cfg, runtime, box, address, addr_type, type_note, on_step, steps_taken)
+            result = await _run_react_loop(
+                runtime, box, address, addr_type, type_note, on_step, steps_taken,
+                rounds_budget, seconds_budget,
+            )
             messages, hit_limit = result["messages"], result["hit_limit"]
 
         # 2. final structured verdict
@@ -349,7 +363,6 @@ async def _execute_tool_call(
 
 
 async def _run_native_loop(
-    cfg: Config,
     runtime: RuntimeClient,
     box: ToolBox,
     address: str,
@@ -357,6 +370,8 @@ async def _run_native_loop(
     type_note: str,
     on_step: OnStep,
     steps_taken: list[str],
+    max_rounds: int,
+    max_seconds: int,
 ) -> dict:
     """Native OpenAI tool-calling loop. Returns {'messages': [...], 'hit_limit': bool}."""
     messages: list[dict] = [
@@ -366,8 +381,8 @@ async def _run_native_loop(
     t0 = time.monotonic()
     hit_limit = False
 
-    for round_no in range(cfg.max_tool_rounds):
-        if time.monotonic() - t0 > cfg.max_wall_seconds:
+    for round_no in range(max_rounds):
+        if time.monotonic() - t0 > max_seconds:
             log.info("wall-time limit reached after %d rounds", round_no)
             hit_limit = True
             break
@@ -426,13 +441,12 @@ async def _run_native_loop(
             )
     else:
         hit_limit = True
-        log.info("round limit (%d) reached", cfg.max_tool_rounds)
+        log.info("round limit (%d) reached", max_rounds)
 
     return {"messages": messages, "hit_limit": hit_limit}
 
 
 async def _run_react_loop(
-    cfg: Config,
     runtime: RuntimeClient,
     box: ToolBox,
     address: str,
@@ -440,6 +454,8 @@ async def _run_react_loop(
     type_note: str,
     on_step: OnStep,
     steps_taken: list[str],
+    max_rounds: int,
+    max_seconds: int,
 ) -> dict:
     """ReAct fallback: model outputs strict JSON actions, we parse manually."""
     messages: list[dict] = [
@@ -450,8 +466,8 @@ async def _run_react_loop(
     hit_limit = False
     bad_replies = 0
 
-    for round_no in range(cfg.max_tool_rounds):
-        if time.monotonic() - t0 > cfg.max_wall_seconds:
+    for round_no in range(max_rounds):
+        if time.monotonic() - t0 > max_seconds:
             hit_limit = True
             break
 

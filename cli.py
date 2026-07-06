@@ -64,6 +64,8 @@ async def main() -> None:
     parser.add_argument("--type", choices=["token", "wallet"], default=None,
                         help="skip auto-detection and force the address type")
     parser.add_argument("--json", action="store_true", help="also print the raw case-file JSON")
+    parser.add_argument("--deep", action="store_true",
+                        help="deep scan: 12 tool rounds / 180s budget instead of 8/90")
     args = parser.parse_args()
 
     if not BASE58_RE.match(args.address):
@@ -79,8 +81,15 @@ async def main() -> None:
         if summary:
             print(f"    → {summary}")
 
-    print(f"🔎 Trail is on the case: {args.address}\n")
-    case = await investigate(cfg, args.address, addr_type=args.type, on_step=on_step)
+    print(f"🔎 Trail is on the case{' (deep scan)' if args.deep else ''}: {args.address}\n")
+    case = await investigate(
+        cfg,
+        args.address,
+        addr_type=args.type,
+        on_step=on_step,
+        max_rounds=12 if args.deep else None,
+        max_seconds=180 if args.deep else None,
+    )
 
     print(render_case_file(case))
     if args.json:
