@@ -191,7 +191,7 @@ python bot.py
 
 CLI flags: `--type token|wallet` skips auto-detection, `--json` prints the raw case file, `--deep` runs a 12-round / 180s deep scan.
 
-**Bot commands:** paste a bare address (or `/scan <address>`) to investigate, `/scan <address> deep` for a longer trail with more wallet hops, `/last` to resend your latest case file. The bot runs at most one investigation per user and three globally (protects the data-provider rate limits under load).
+**Bot commands:** paste a bare address (or `/scan <address>`) to investigate, `/scan <address> deep` for a longer trail with more wallet hops, `/last` to resend your latest case file, `/help` for the full command reference and a guide to reading a case file (risk emoji, confidence, entity profile, the 🔍/💭/→ live-view markers). The bot runs at most one investigation per user and three globally (protects the data-provider rate limits under load).
 
 ### Configuration knobs (optional)
 

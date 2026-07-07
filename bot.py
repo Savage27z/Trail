@@ -9,7 +9,7 @@ import logging
 import re
 import time
 
-from telegram import Update
+from telegram import BotCommand, Update
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, RetryAfter, TelegramError
 from telegram.ext import (
@@ -200,9 +200,44 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "<b>Just paste an address.</b> Or:\n"
         "<code>/scan &lt;address&gt;</code> — standard investigation (~90s)\n"
         "<code>/scan &lt;address&gt; deep</code> — longer trail, more wallet hops\n"
-        "<code>/last</code> — resend your latest case file\n\n"
+        "<code>/last</code> — resend your latest case file\n"
+        "<code>/help</code> — full command reference &amp; how to read a case file\n\n"
         "Try it on BONK:\n"
         "<code>DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263</code>",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message is None:
+        return
+    await update.message.reply_text(
+        "🕵️ <b>Trail — command reference</b>\n\n"
+        "<b>Commands</b>\n"
+        "<code>/scan &lt;address&gt;</code> — investigate a token mint or wallet "
+        "(~90s, up to 8 AI reasoning rounds)\n"
+        "<code>/scan &lt;address&gt; deep</code> — deep scan: longer trail, more "
+        "wallet hops (~3 min, up to 12 rounds)\n"
+        "<code>/last</code> — resend your most recent case file\n"
+        "<code>/start</code> — intro &amp; quick example\n"
+        "<code>/help</code> — this page\n\n"
+        "<b>Shortcut:</b> you don't need <code>/scan</code> at all — just paste "
+        "a Solana address on its own and I'll investigate it.\n\n"
+        "<b>How to read a case file</b>\n"
+        "🟢 low &nbsp; 🟡 medium &nbsp; 🟠 high &nbsp; 🔴 critical — overall risk\n"
+        "<b>Confidence</b> — how much evidence backs the verdict (low if data "
+        "was missing or the scan was cut short)\n"
+        "<b>Entity profile</b> — my best label for what this address is: "
+        "<i>serial_deployer, insider, bot, normal_trader, cex_linked, fund, "
+        "unknown</i>\n"
+        "<b>Evidence</b> — each finding links to the real address/tx on Solscan "
+        "so you can verify it yourself\n\n"
+        "<b>While a scan runs</b> you'll see it live: 🔍 = pulling data, 💭 = "
+        "the agent reasoning about what it found, → = a result. That's an LLM "
+        "deciding the investigation path in real time, not a canned script.\n\n"
+        "<b>Limits:</b> one scan per person at a time, up to 3 running across "
+        "all users at once (so I don't get rate-limited mid-investigation). "
+        "Just paste an address — a token mint or a wallet — to get started.",
         parse_mode=ParseMode.HTML,
     )
 
@@ -304,8 +339,20 @@ async def bare_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     elif update.effective_chat and update.effective_chat.type == "private":
         # only nag about invalid input in DMs — in groups, stay silent
         await update.message.reply_text(
-            "Paste a Solana address or use /scan <address>. /start for help."
+            "Paste a Solana address or use /scan <address>. /help for the full guide."
         )
+
+
+async def _post_init(app: Application) -> None:
+    """Populate Telegram's "/" command menu so commands are discoverable with descriptions."""
+    await app.bot.set_my_commands(
+        [
+            BotCommand("scan", "Investigate a token mint or wallet address"),
+            BotCommand("last", "Resend your most recent case file"),
+            BotCommand("help", "Full command reference & how to read a case file"),
+            BotCommand("start", "Intro & quick example"),
+        ]
+    )
 
 
 def main() -> None:
@@ -317,9 +364,11 @@ def main() -> None:
         Application.builder()
         .token(CFG.telegram_bot_token)
         .concurrent_updates(True)  # don't let one user's 90s scan block everyone
+        .post_init(_post_init)
         .build()
     )
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("scan", cmd_scan))
     app.add_handler(CommandHandler("last", cmd_last))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bare_address))
